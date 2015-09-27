@@ -1,0 +1,105 @@
+---
+title: "Machine Learning"
+author: "Peter Skelton"
+date: "24 September 2015"
+output: html_document
+---
+
+##Synopsis
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, the goal will be to use data from accelerators on the belt, forearm, arm, and dumbbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. This paper will outline building a machine learning algorithm to predict in which of the 5 different ways the activity performed.
+
+The final model had an out of sample error of 0.8% on the testing data split.
+It correctly predicted all 20 cases of the test set of data.
+
+More information on the data set is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset)
+
+###Data Processing
+First we will need to download and then read in the data set.
+```{r}
+traindataurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testdataurl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+traindatapath <- "data\\pml-training.csv"
+testdatapath <- "data\\pml-testing.csv"
+
+if ( !file.exists( traindatapath ) ){
+    download.file( traindataurl, destfile = traindatapath )
+    download.file( testdataurl, destfile = testdatapath )
+}
+
+training <- read.csv( traindatapath )
+testing <- read.csv( testdatapath )
+```
+Take a look at the data to see what we are dealing with.
+```{r}
+dim( training )
+str( training )
+sum( is.na( training ) )
+```
+We notice that the data set contains many NA's and missing values. Lets clean up some of the columns.
+Here we are only keeping columns with less than 500 missing values.
+```{r}
+training <- Filter( function(x) (sum(x=="")<500), training) 
+sum( is.na( training ) )
+```
+Finally remove the first 7 columns which are unrelated to the model fitting. Then divide up for training and validation sets.
+```{r}
+training <- training[ ,-(1:7) ]
+library( caret )
+set.seed( 97765 )
+intrain <- createDataPartition( y=training$classe, p=0.7, list=FALSE )
+trainsplit <- training[ intrain, ]
+testsplit <- training[ -intrain, ]
+```
+
+###Data Modelling
+Here we will be using a Random Forest (RF) algorithm to train the data set on. Random Forrest are often one of the best machine learning algorithms in terms of their end accuracy. However, this comes at the cost of: high computational requirements (speed), the interpret ability of the final model and a tendency of the model to over fit onto the training data.
+To speed up the model processing time we will use parallel processing to divide the workload up onto multiple CPU cores.
+To reduce the chances of over fitting, the model will be using cross validation. Firstly we have already split the data up 70/30 into a training and testing data sets. This will allow us to check the model against a known data set. Further to that, the model will be using 10 fold cross validation during the learning process to reduce its variability.
+
+```{r}
+library(parallel, quietly=T)
+library(doParallel, quietly=T)
+
+## Turn on PP - With thanks to RAY JONES (TA)
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+
+# 'classe' is the way in which the activcy was performed. Here we fit it against all other vairables in the data set.
+modelfit <- train( factor( trainsplit$classe ) ~ . , method="rf", data=trainsplit, trControl = trainControl(method="cv", number=10) ) 
+
+## Turn off PP
+stopCluster(cluster)
+modelfit
+```
+The model is reporting an accuracy of 99.3% Lets now compare our model performance against the data we split up for testing.
+```{r}
+confmat1 <- confusionMatrix( trainsplit$classe, predict( modelfit ))
+confmat2 <- confusionMatrix( testsplit$classe, predict( modelfit, testsplit ))
+confmat2$table
+confmat2$overall
+```
+We can see that the model has performed very well on the testing set. The out of sample error rate is about 0.8%
+
+###Predicting
+Now using the model fit, we can predict onto the testing set for answer submission.
+```{r}
+answers <- as.character( predict( modelfit, testing ) )
+
+# Code for exporting individual answer files for submission.
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(answers)
+```
+The model scored 100%.
+
+###Conclusion
+The goal of this project was to use use data from accelerators on participants performing barbell lifts to build a model able to predict the manner in which the exercise was performed. The model was built using a random trees algorithm with cross validation to identify the activity class.
+
+The final model had an out of sample error of 0.8% on the testing data split.
+It correctly predicted all 20 cases of the test set of data.
